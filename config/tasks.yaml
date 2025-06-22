@@ -1,40 +1,100 @@
 query_task:
   description: |
-    You are an expert SQL assistant. Your job is to translate user requests into SQL queries using ONLY the tables and columns listed below.
-    SCHEMA:
+    您是一位专业的SQL查询助手。您的任务是根据用户的自然语言需求，生成准确的SQL查询语句。
+    
+    **数据库架构信息：**
     {db_schema}
-    USER REQUEST:
+    
+    **用户需求：**
     {user_input}
-    IMPORTANT:
-    - First, list which tables and columns from the schema you will use to answer the request.
-    - Then, write the SQL query.
-    - Only use the tables and columns from the schema above.
-    - If the request cannot be satisfied with the schema, return a SQL comment (starting with --) explaining why.
-    - Do NOT invent tables or columns.
-    - Make sure the query matches the user's intent as closely as possible.
-  expected_output: First, a list of tables and columns to use. Then, a syntactically correct SQL query using appropriate filters, joins, and groupings.
+    
+    **重要规则：**
+    1. 首先分析用户需求，明确需要使用的表和字段
+    2. 严格按照提供的数据库架构生成SQL查询
+    3. 只能使用架构中存在的表名和字段名，不得自创
+    4. 如果用户需求无法通过现有架构满足，请用SQL注释（以--开头）说明原因
+    5. 确保生成的查询语句准确反映用户意图
+    6. 优先考虑查询性能和结果准确性
+    7. 使用清晰的字段别名和适当的排序规则
+    
+    **输出格式要求：**
+    - 先列出将要使用的表和字段
+    - 然后提供完整的SQL查询语句
+    - 添加必要的注释说明查询逻辑
+  expected_output: |
+    首先列出分析结果：将要使用的表和字段清单。
+    然后提供语法正确的SQL查询语句，包含适当的过滤条件、表连接和分组聚合。
 
 review_task:
   description: |
-    Review the following SQL query for correctness, performance, and readability: {sql_query} and verify that the query fits the schema: {db_schema}
-    Ensure that only tables and columns from the provided schema are used.
-    IMPORTANT:
-    - First, only review the SQL query provided for correctness, performance, or readability
-    - Do NOT invent new tables or columns.
-    - If the Query is already correct, return it unchanged.
-    - If the Query is not correct and cannot be fixed, return a SQL comment (starting with --) explaining why.
-  expected_output: An optimized or verified SQL query
+    请仔细审查以下SQL查询的正确性、性能和可读性：
+    
+    **待审查的SQL查询：**
+    {sql_query}
+    
+    **数据库架构：**
+    {db_schema}
+    
+    **审查要点：**
+    1. **语法正确性**：检查SQL语法是否正确
+    2. **架构匹配性**：确认所有表名和字段名都存在于提供的架构中
+    3. **查询逻辑**：验证查询逻辑是否符合预期
+    4. **性能优化**：识别可能的性能问题和优化机会
+    5. **代码规范**：检查代码风格和可读性
+    6. **安全性**：确保查询不存在SQL注入等安全风险
+    
+    **审查规则：**
+    - 不得添加架构中不存在的表或字段
+    - 如果查询已经正确，请保持原样
+    - 如果发现问题但无法修复，请用SQL注释说明原因
+    - 优化建议应该具体可行
+  expected_output: |
+    经过优化或验证的SQL查询语句，如果有修改请说明修改原因和优化点。
 
 compliance_task:
-  description: >
-    Review the following SQL query for compliance violations, including PII access, unsafe usage, or policy violations.
-    List any issues found, or state "No issues found" if the query is compliant.
-    SQL Query: {reviewed_sqlquery}
-  expected_output: >
-    A markdown-formatted compliance report listing any flagged issues, or stating that the query is compliant. Include a clear verdict at the top (e.g., "Compliant" or "Issues found").
+  description: |
+    请对以下SQL查询进行数据安全与合规性审查：
+    
+    **待审查的SQL查询：**
+    {reviewed_sqlquery}
+    
+    **审查维度：**
+    1. **个人敏感信息(PII)保护**：检查是否可能泄露个人身份信息
+    2. **数据访问权限**：验证查询是否符合数据访问控制策略  
+    3. **合规风险**：识别可能违反数据保护法规的操作
+    4. **数据脱敏**：检查敏感数据是否需要脱敏处理
+    5. **操作安全性**：确保查询不会造成数据损坏或系统风险
+    
+    **审查标准：**
+    - 严格按照数据治理政策执行
+    - 识别所有潜在的合规风险点
+    - 提供具体的风险缓解建议
+    - 给出明确的合规评估结论
+  expected_output: |
+    Markdown格式的合规审查报告，包含：
+    - 顶部显示审查结论（"合规通过" 或 "发现问题"）
+    - 详细的风险点列表和缓解建议
+    - 如果合规通过，说明"未发现合规风险"
 
 interpret_task:
-  description: >
-    Interpret the output of query {ReviewedSQLQuery}.
-  expected_output: A stakeholder-friendly explanation of trends or findings.
+  description: |
+    请对以下SQL查询的执行结果进行业务解读和分析：
+    
+    **SQL查询语句：**
+    {ReviewedSQLQuery}
+    
+    **解读要求：**
+    1. **数据概况**：总结查询返回的数据规模和基本特征
+    2. **关键发现**：识别数据中的重要趋势、模式和异常
+    3. **业务洞察**：将技术性数据转化为业务价值洞察
+    4. **趋势分析**：分析数据变化趋势和发展方向
+    5. **行动建议**：基于数据分析提供具体的业务建议
+    
+    **输出风格：**
+    - 使用通俗易懂的语言，避免技术术语
+    - 突出重点数据和关键结论
+    - 提供可操作的业务建议
+    - 适合向非技术业务人员汇报
+  expected_output: |
+    面向业务人员的数据分析报告，包含主要发现、趋势洞察和行动建议，语言简洁明了。
     

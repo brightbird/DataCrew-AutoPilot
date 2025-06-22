@@ -112,4 +112,33 @@ poetry.lock
 *.sqlite3
 
 # dotenv environment variables
-.env 
+.env
+
+# ===== 项目特定忽略规则 =====
+
+# PandasAI生成的文件
+pandasai.log
+*.pandasai.log
+
+# 图表和可视化文件
+charts/*.png
+charts/*.jpg
+charts/*.jpeg
+charts/*.svg
+charts/*.pdf
+exports/charts/
+
+# 临时测试文件
+test_*.py
+temp_*.py
+
+# Streamlit缓存
+.streamlit/
+
+# 日志文件
+*.log
+
+# 开发过程中的临时文件
+temp/
+tmp/
+*.tmp 

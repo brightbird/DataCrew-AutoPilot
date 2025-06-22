@@ -1,8 +1,17 @@
-from crewai import Agent, Task, Crew
-from utils.db_simulator import setup_sample_db, run_query, get_db_schema
 import os
 import yaml
 from dotenv import load_dotenv, find_dotenv
+
+# 加载环境变量
+load_dotenv()
+
+# 设置阿里云百炼API为OpenAI兼容模式（CrewAI需要）
+if os.environ.get("DASHSCOPE_API_KEY"):
+    os.environ["OPENAI_API_KEY"] = os.environ.get("DASHSCOPE_API_KEY")
+    os.environ["OPENAI_API_BASE"] = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+from crewai import Agent, Task, Crew
+from utils.db_simulator import setup_sample_db, run_query, get_db_schema
 import crew_setup as cs
 from crewai import Flow
 from crewai.flow.flow import listen, start
