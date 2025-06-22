@@ -4,6 +4,9 @@ import random
 import datetime
 from datetime import datetime, timedelta
 import json
+import os
+import re
+from typing import Dict, List, Tuple
 
 DB_PATH = "data/sample_db.sqlite"
 
@@ -732,6 +735,275 @@ def get_structured_schema(db_path):
     
     conn.close()
     return '\n'.join(lines)
+
+def extract_relevant_metadata(user_query: str, db_path: str) -> str:
+    """
+    根据用户查询智能提取相关的数据库元数据
+    
+    Args:
+        user_query: 用户的自然语言查询
+        db_path: 数据库路径
+        
+    Returns:
+        筛选后的相关元数据信息
+    """
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # 获取所有表名
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        all_tables = [row[0] for row in cursor.fetchall()]
+        
+        # 分析用户查询，识别可能相关的表
+        relevant_tables = identify_relevant_tables(user_query, all_tables)
+        
+        # 如果没有识别到相关表，返回核心业务表
+        if not relevant_tables:
+            relevant_tables = get_core_business_tables(all_tables)
+        
+        # 构建精简的元数据信息
+        metadata = build_focused_metadata(cursor, relevant_tables)
+        
+        conn.close()
+        return metadata
+        
+    except Exception as e:
+        print(f"元数据提取失败: {e}")
+        # 降级到完整架构
+        return get_structured_schema(db_path)
+
+def identify_relevant_tables(user_query: str, all_tables: List[str]) -> List[str]:
+    """
+    基于用户查询识别相关表
+    
+    Args:
+        user_query: 用户查询
+        all_tables: 所有表名列表
+        
+    Returns:
+        相关表名列表
+    """
+    query_lower = user_query.lower()
+    relevant_tables = []
+    
+    # 定义关键词到表的映射
+    keyword_table_mapping = {
+        # 销售相关
+        '销售': ['orders', 'order_items', 'products'],
+        '订单': ['orders', 'order_items', 'customers'],
+        '收入': ['orders', 'order_items', 'products'],
+        '金额': ['orders', 'order_items'],
+        'sales': ['orders', 'order_items', 'products'],
+        'revenue': ['orders', 'order_items', 'products'],
+        'order': ['orders', 'order_items', 'customers'],
+        
+        # 产品相关
+        '产品': ['products', 'product_categories', 'suppliers', 'order_items'],
+        '商品': ['products', 'product_categories', 'order_items'],
+        'product': ['products', 'product_categories', 'suppliers', 'order_items'],
+        '分类': ['product_categories', 'products'],
+        'category': ['product_categories', 'products'],
+        
+        # 客户相关
+        '客户': ['customers', 'customer_segments', 'orders'],
+        '用户': ['customers', 'customer_segments', 'website_sessions'],
+        'customer': ['customers', 'customer_segments', 'orders'],
+        'user': ['customers', 'website_sessions'],
+        
+        # 员工相关
+        '员工': ['employees', 'departments', 'employee_performance'],
+        '部门': ['departments', 'employees'],
+        'employee': ['employees', 'departments', 'employee_performance'],
+        'department': ['departments', 'employees'],
+        
+        # 评价相关
+        '评价': ['product_reviews', 'products', 'customers'],
+        '评论': ['product_reviews', 'products'],
+        'review': ['product_reviews', 'products', 'customers'],
+        'rating': ['product_reviews', 'products'],
+        
+        # 支持相关
+        '支持': ['customer_support_tickets', 'customers', 'employees'],
+        '工单': ['customer_support_tickets', 'customers'],
+        'support': ['customer_support_tickets', 'customers', 'employees'],
+        'ticket': ['customer_support_tickets', 'customers'],
+        
+        # 网站相关
+        '网站': ['website_sessions', 'customers'],
+        '会话': ['website_sessions', 'customers'],
+        'website': ['website_sessions', 'customers'],
+        'session': ['website_sessions', 'customers'],
+        
+        # 营销相关
+        '营销': ['marketing_campaigns', 'campaign_interactions', 'customers'],
+        '活动': ['marketing_campaigns', 'campaign_interactions'],
+        'marketing': ['marketing_campaigns', 'campaign_interactions', 'customers'],
+        'campaign': ['marketing_campaigns', 'campaign_interactions'],
+        
+        # 时间相关
+        '最近': ['orders', 'order_items', 'website_sessions'],
+        '今天': ['orders', 'website_sessions'],
+        '本月': ['orders', 'order_items'],
+        '趋势': ['orders', 'order_items', 'website_sessions'],
+        'recent': ['orders', 'order_items', 'website_sessions'],
+        'today': ['orders', 'website_sessions'],
+        'trend': ['orders', 'order_items', 'website_sessions'],
+        
+        # 统计相关
+        '总额': ['orders', 'order_items'],
+        '数量': ['orders', 'order_items', 'products', 'customers'],
+        '平均': ['orders', 'order_items', 'product_reviews'],
+        '排行': ['orders', 'order_items', 'products'],
+        'total': ['orders', 'order_items'],
+        'count': ['orders', 'order_items', 'products', 'customers'],
+        'average': ['orders', 'order_items', 'product_reviews'],
+        'top': ['orders', 'order_items', 'products'],
+        'rank': ['orders', 'order_items', 'products']
+    }
+    
+    # 根据关键词匹配表
+    for keyword, tables in keyword_table_mapping.items():
+        if keyword in query_lower:
+            for table in tables:
+                if table in all_tables and table not in relevant_tables:
+                    relevant_tables.append(table)
+    
+    # 直接表名匹配
+    for table in all_tables:
+        if table.lower() in query_lower and table not in relevant_tables:
+            relevant_tables.append(table)
+    
+    # 限制返回的表数量，避免信息过载
+    return relevant_tables[:5]
+
+def get_core_business_tables(all_tables: List[str]) -> List[str]:
+    """
+    获取核心业务表（当无法识别相关表时的降级方案）
+    
+    Args:
+        all_tables: 所有表名列表
+        
+    Returns:
+        核心业务表列表
+    """
+    core_tables = ['orders', 'order_items', 'products', 'customers']
+    return [table for table in core_tables if table in all_tables]
+
+def build_focused_metadata(cursor, relevant_tables: List[str]) -> str:
+    """
+    构建聚焦的元数据信息
+    
+    Args:
+        cursor: 数据库游标
+        relevant_tables: 相关表列表
+        
+    Returns:
+        聚焦的元数据字符串
+    """
+    metadata_parts = []
+    
+    # 添加数据库类型说明
+    metadata_parts.append("**数据库类型：** SQLite")
+    metadata_parts.append("**重要提示：** 请使用SQLite语法，日期函数使用 date('now', '-N days') 格式\n")
+    
+    # 为每个相关表生成详细信息
+    for table_name in relevant_tables:
+        try:
+            # 获取表结构
+            cursor.execute(f"PRAGMA table_info({table_name})")
+            columns = cursor.fetchall()
+            
+            if not columns:
+                continue
+                
+            metadata_parts.append(f"📋 **{table_name}表：**")
+            
+            # 添加字段信息
+            field_descriptions = []
+            for column in columns:
+                col_name = column[1]
+                col_type = column[2]
+                is_pk = column[5]
+                not_null = column[3]
+                
+                field_desc = f"  - {col_name} ({col_type})"
+                if is_pk:
+                    field_desc += " [主键]"
+                if not_null:
+                    field_desc += " [非空]"
+                    
+                field_descriptions.append(field_desc)
+            
+            metadata_parts.extend(field_descriptions)
+            
+            # 添加数据量信息
+            try:
+                cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+                count = cursor.fetchone()[0]
+                metadata_parts.append(f"  📊 数据量：{count:,} 条记录")
+            except:
+                pass
+            
+            # 添加关键字段的示例值（仅针对重要表）
+            if table_name in ['orders', 'products', 'customers']:
+                try:
+                    cursor.execute(f"SELECT * FROM {table_name} LIMIT 2")
+                    sample_rows = cursor.fetchall()
+                    if sample_rows:
+                        metadata_parts.append(f"  💡 示例数据：")
+                        for i, row in enumerate(sample_rows[:1], 1):  # 只显示1行示例
+                            row_desc = ", ".join([f"{columns[j][1]}={row[j]}" for j in range(min(3, len(row)))])
+                            metadata_parts.append(f"    {i}. {row_desc}...")
+                except:
+                    pass
+            
+            metadata_parts.append("")  # 空行分隔
+            
+        except Exception as e:
+            print(f"处理表 {table_name} 时出错: {e}")
+            continue
+    
+    # 添加表关系说明（仅针对相关表）
+    if len(relevant_tables) > 1:
+        metadata_parts.append("🔗 **表关系说明：**")
+        relationships = get_table_relationships(relevant_tables)
+        metadata_parts.extend(relationships)
+    
+    return "\n".join(metadata_parts)
+
+def get_table_relationships(tables: List[str]) -> List[str]:
+    """
+    获取表之间的关系说明
+    
+    Args:
+        tables: 表名列表
+        
+    Returns:
+        关系说明列表
+    """
+    relationships = []
+    
+    # 定义核心表关系
+    table_relations = {
+        ('orders', 'customers'): "orders.customer_id → customers.customer_id",
+        ('orders', 'order_items'): "orders.order_id → order_items.order_id",
+        ('order_items', 'products'): "order_items.product_id → products.product_id",
+        ('products', 'product_categories'): "products.category_id → product_categories.category_id",
+        ('products', 'suppliers'): "products.supplier_id → suppliers.supplier_id",
+        ('product_reviews', 'products'): "product_reviews.product_id → products.product_id",
+        ('product_reviews', 'customers'): "product_reviews.customer_id → customers.customer_id",
+        ('customer_support_tickets', 'customers'): "customer_support_tickets.customer_id → customers.customer_id",
+        ('website_sessions', 'customers'): "website_sessions.customer_id → customers.customer_id",
+        ('employees', 'departments'): "employees.department_id → departments.department_id"
+    }
+    
+    # 只显示相关表之间的关系
+    for (table1, table2), relation in table_relations.items():
+        if table1 in tables and table2 in tables:
+            relationships.append(f"  - {relation}")
+    
+    return relationships
 
 if __name__ == "__main__":
     setup_sample_db()
