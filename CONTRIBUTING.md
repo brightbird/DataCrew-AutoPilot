@@ -9,7 +9,7 @@
 
 ### 2. 克隆代码
 ```bash
-git clone https://github.com/your-username/DataCrew-AutoPilot.git
+git clone https://github.com/brightbird/DataCrew-AutoPilot.git
 cd DataCrew-AutoPilot
 ```
 

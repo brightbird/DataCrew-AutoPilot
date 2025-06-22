@@ -72,8 +72,8 @@ graph TB
 
 ```bash
 # 获取您的专属数据分析座驾
-git clone https://github.com/your-username/datacrew-autopilot.git
-cd datacrew-autopilot
+git clone https://github.com/brightbird/DataCrew-AutoPilot.git
+cd DataCrew-AutoPilot
 
 # 创建独立驾驶环境
 python3 -m venv venv
@@ -241,8 +241,8 @@ DataCrew-AutoPilot/
   <br><br>
   <i>让AI智能体团队为您的数据分析保驾护航</i>
   <br><br>
-  <a href="https://github.com/your-username/datacrew-autopilot/stargazers">⭐ 收藏座驾</a> |
-  <a href="https://github.com/your-username/datacrew-autopilot/fork">🚗 获取副本</a> |
-  <a href="https://github.com/your-username/datacrew-autopilot/issues">🔧 报告故障</a> |
-  <a href="https://github.com/your-username/datacrew-autopilot/issues">💡 功能建议</a>
+  <a href="https://github.com/brightbird/DataCrew-AutoPilot/stargazers">⭐ 收藏座驾</a> |
+  <a href="https://github.com/brightbird/DataCrew-AutoPilot/fork">🚗 获取副本</a> |
+  <a href="https://github.com/brightbird/DataCrew-AutoPilot/issues">🔧 报告故障</a> |
+  <a href="https://github.com/brightbird/DataCrew-AutoPilot/issues">💡 功能建议</a>
 </div>
