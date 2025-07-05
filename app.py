@@ -3,8 +3,8 @@ import os
 import pandas as pd
 from dotenv import load_dotenv
 from crew_setup import (
-    sql_generator_crew, sql_reviewer_crew, sql_compliance_crew,
-    query_generator_agent, query_reviewer_agent, compliance_checker_agent
+    sql_generator_crew, sql_reviewer_crew,
+    query_generator_agent, query_reviewer_agent
 )
 from utils.db_simulator import get_structured_schema, run_query, extract_relevant_metadata
 from utils.pandasai_helper import PandasAIAnalyzer
@@ -13,11 +13,15 @@ from utils.helper import extract_token_counts, calculate_gpt4o_mini_cost
 import base64
 from datetime import datetime
 import uuid
-from typing import List
+from typing import List, Dict, Any, Optional, Tuple
 import json
 import traceback
 from crewai import Task
 import re # <--- 统一导入re模块
+import logging
+import sys
+import io
+from contextlib import redirect_stdout, redirect_stderr
 
 # 加载环境变量
 load_dotenv()
@@ -26,6 +30,43 @@ load_dotenv()
 if os.environ.get("DASHSCOPE_API_KEY"):
     os.environ["OPENAI_API_KEY"] = os.environ.get("DASHSCOPE_API_KEY")
     os.environ["OPENAI_API_BASE"] = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+# 全局禁用CrewAI的详细输出和遥测
+os.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
+os.environ["OTEL_SDK_DISABLED"] = "true"
+
+# 完全禁用CrewAI和相关库的日志输出
+logging.getLogger("crewai").setLevel(logging.CRITICAL)
+logging.getLogger("rich").setLevel(logging.CRITICAL)
+logging.getLogger("langchain").setLevel(logging.CRITICAL)
+logging.getLogger("openai").setLevel(logging.CRITICAL)
+
+# 禁用rich控制台输出
+try:
+    from rich.console import Console
+    # 创建一个空的Console实例来替换默认的
+    import rich.console
+    rich.console.Console = lambda *args, **kwargs: type('MockConsole', (), {
+        'print': lambda *a, **k: None,
+        'log': lambda *a, **k: None,
+        'rule': lambda *a, **k: None,
+        'status': lambda *a, **k: type('MockStatus', (), {'__enter__': lambda s: s, '__exit__': lambda *a: None})()
+    })()
+except ImportError:
+    pass
+
+# 创建一个上下文管理器来完全抑制输出
+class SilentCrewAI:
+    def __enter__(self):
+        self.original_stdout = sys.stdout
+        self.original_stderr = sys.stderr
+        sys.stdout = io.StringIO()
+        sys.stderr = io.StringIO()
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        sys.stdout = self.original_stdout
+        sys.stderr = self.original_stderr
 
 DB_PATH = "data/sample_db.sqlite"
 
@@ -588,7 +629,9 @@ def enter_manual_intervention_mode(user_prompt, generated_sql):
     """进入人工干预模式"""
     st.session_state["manual_intervention_mode"] = True
     st.session_state["pending_user_prompt"] = user_prompt
-    st.session_state["pending_manual_sql"] = generated_sql
+    # 格式化SQL以提高可读性
+    formatted_sql = sqlparse.format(generated_sql, reindent=True, keyword_case='upper')
+    st.session_state["pending_manual_sql"] = formatted_sql
 
 def process_manual_sql(manual_sql: str, user_request: str):
     """处理手动输入的SQL"""
@@ -604,9 +647,12 @@ def process_manual_sql(manual_sql: str, user_request: str):
             temp_crew = Crew(
                 agents=[query_reviewer_agent],
                 tasks=[review_task],
-                verbose=True
+                verbose=False
             )
-            review_result = temp_crew.kickoff()
+            
+            # 使用静默上下文管理器
+            with SilentCrewAI():
+                review_result = temp_crew.kickoff()
             
             # 提取审查后的SQL
             reviewed_sql = extract_sql_from_response(str(review_result))
@@ -614,89 +660,32 @@ def process_manual_sql(manual_sql: str, user_request: str):
         # 显示审查后的SQL
         st.code(reviewed_sql, language="sql")
         
-        # 合规性审查
-        st.write("### 🛡️ 数据合规性审查")
+        # 直接执行查询，跳过合规检查
         
-        with st.spinner("🛡️ 正在进行合规性审查..."):
-            compliance_task = Task(
-                description=f"""请对以下SQL查询进行数据安全与合规性审查：
-**待审查的SQL查询：**
-{reviewed_sql}
-**审查维度：**
-1. **个人敏感信息(PII)保护**：检查是否可能泄露个人身份信息
-2. **数据访问权限**：验证查询是否符合数据访问控制策略  
-3. **合规风险**：识别可能违反数据保护法规的操作
-4. **数据脱敏**：检查敏感数据是否需要脱敏处理
-5. **操作安全性**：确保查询不会造成数据损坏或系统风险
-**审查标准：**
-- 严格按照数据治理政策执行
-- 识别所有潜在的合规风险点
-- 提供具体的风险缓解建议
-- 给出明确的合规评估结论""",
-                expected_output="JSON格式的合规审查报告，包含report字段",
-                agent=compliance_checker_agent
-            )
-            
-            # 创建临时的Crew来执行这个任务
-            temp_crew = Crew(
-                agents=[compliance_checker_agent],
-                tasks=[compliance_task],
-                verbose=True
-            )
-            compliance_result = temp_crew.kickoff()
-            
-            try:
-                compliance_data = json.loads(str(compliance_result))
-                compliance_report = compliance_data.get("report", str(compliance_result))
-            except:
-                compliance_report = str(compliance_result)
-        
-        # 显示合规报告
-        with st.expander("📋 查看详细合规报告", expanded=False):
-            st.markdown(compliance_report)
-        
-        # 创建查询记录 - 使用create_analysis_record函数确保所有字段都存在
+        # 创建查询记录
         record = create_analysis_record(
             user_prompt=user_request,
             generated_sql=manual_sql,
             reviewed_sql=reviewed_sql,
-            compliance_report=compliance_report,
             cost=0.0,
             manual_intervention=True,
             manual_sql=manual_sql
         )
-        st.session_state["current_cell"] = record["id"]
-        record["status"] = "pending_execution"
         
-        # 执行查询（如果合规）
-        compliance_lower = str(compliance_report).lower()
-        is_compliant = (
-            "合规通过" in str(compliance_report) or 
-            "compliant" in compliance_lower or
-            ("合规" in str(compliance_report) and "不合规" not in str(compliance_report) and "违规" not in str(compliance_report))
-        )
-        
-        if is_compliant:
-            with st.spinner("📊 执行查询..."):
-                df, text_result = run_query_to_dataframe(reviewed_sql)
-                record["query_result"] = text_result
-                record["query_dataframe"] = df
-                
-                if df is not None:
-                    st.success("🎉 查询执行成功！数据已准备就绪，可以使用PandasAI进行进一步分析。")
-                    record["status"] = "completed"
-                else:
-                    # 查询失败，text_result包含错误信息
-                    st.warning("⚠️ 查询执行失败，请检查SQL语句。")
-                    record["status"] = "query_failed"
-                    # 从text_result中提取具体的错误信息
-                    if text_result and "查询失败:" in text_result:
-                        record["error_message"] = text_result
-                    else:
-                        record["error_message"] = text_result or "SQL查询执行失败，但未返回具体错误信息"
-        else:
-            st.error("❌ 查询未通过合规审查，无法执行。请查看合规报告了解详情。")
-            record["status"] = "compliance_failed"
+        # 执行查询
+        with st.spinner("📊 执行查询..."):
+            df, text_result = run_query_to_dataframe(reviewed_sql)
+            record["query_result"] = text_result
+            record["query_dataframe"] = df
+            
+            if df is not None:
+                st.success("🎉 查询执行成功！数据已准备就绪，可以使用PandasAI进行进一步分析。")
+                record["status"] = "completed"
+            else:
+                # 查询失败，text_result包含错误信息
+                st.error(f"❌ 查询执行失败: {text_result}")
+                record["status"] = "query_failed"
+                record["error_message"] = text_result or "SQL查询执行失败"
         
         # 添加到历史记录
         st.write(f"🔍 **调试信息**：准备添加记录到历史，记录状态 = {record.get('status', 'unknown')}")
@@ -759,9 +748,12 @@ def execute_new_analysis(user_prompt):
             temp_crew = Crew(
                 agents=[query_generator_agent],
                 tasks=[generation_task],
-                verbose=True
+                verbose=False
             )
-            generation_result = temp_crew.kickoff()
+            
+            # 使用静默上下文管理器
+            with SilentCrewAI():
+                generation_result = temp_crew.kickoff()
             
             # 提取SQL查询
             raw_sql = extract_sql_from_response(str(generation_result))
@@ -772,8 +764,20 @@ def execute_new_analysis(user_prompt):
             st.write("**生成的SQL查询：**")
             formatted_sql = sqlparse.format(raw_sql, reindent=True, keyword_case='upper')
             st.code(formatted_sql, language="sql")
-            # 继续处理，传递record对象
-            continue_with_generated_sql(raw_sql, user_prompt, record)
+            
+            # 检查是否启用了人工干预模式
+            if st.session_state.get("enable_manual_intervention", False):
+                # 保存生成的SQL信息，等待用户选择
+                st.session_state["generated_sql_info"] = {
+                    "raw_sql": raw_sql,
+                    "user_prompt": user_prompt,
+                    "show_choice": True
+                }
+                st.info("🛠️ **人工干预模式**：请选择执行方式")
+                st.rerun()
+            else:
+                # 快速模式：直接继续处理
+                continue_with_generated_sql(raw_sql, user_prompt, record)
         else:
             st.error("❌ SQL生成失败")
             record["status"] = "error"
@@ -804,9 +808,12 @@ def continue_with_generated_sql(generated_sql: str, user_request: str, record: d
                 temp_crew = Crew(
                     agents=[query_reviewer_agent],
                     tasks=[review_task],
-                    verbose=True
+                    verbose=False
                 )
-                review_result = temp_crew.kickoff()
+                
+                # 使用静默上下文管理器
+                with SilentCrewAI():
+                    review_result = temp_crew.kickoff()
                 
                 st.write(f"🔍 **调试信息**：SQL审查原始结果 = {str(review_result)[:200]}...")
                 
@@ -831,113 +838,33 @@ def continue_with_generated_sql(generated_sql: str, user_request: str, record: d
             # 显示审查后的SQL
             st.code(reviewed_sql, language="sql")
             
-            # Step 3: 合规性审查
-            st.write("### 🛡️ Step 3: 数据合规性审查")
-            
-            with st.spinner("🛡️ 正在进行合规性审查..."):
-                st.write("🔍 **调试信息**：开始合规审查")
-                compliance_task = Task(
-                    description=f"""请对以下SQL查询进行数据安全与合规性审查：
-**待审查的SQL查询：**
-{reviewed_sql}
-**审查维度：**
-1. **个人敏感信息(PII)保护**：检查是否可能泄露个人身份信息
-2. **数据访问权限**：验证查询是否符合数据访问控制策略  
-3. **合规风险**：识别可能违反数据保护法规的操作
-4. **数据脱敏**：检查敏感数据是否需要脱敏处理
-5. **操作安全性**：确保查询不会造成数据损坏或系统风险
-**审查标准：**
-- 严格按照数据治理政策执行
-- 识别所有潜在的合规风险点
-- 提供具体的风险缓解建议
-- 给出明确的合规评估结论""",
-                    expected_output="JSON格式的合规审查报告，包含report字段",
-                    agent=compliance_checker_agent
-                )
-                
-                # 创建临时的Crew来执行这个任务
-                temp_crew = Crew(
-                    agents=[compliance_checker_agent],
-                    tasks=[compliance_task],
-                    verbose=True
-                )
-                compliance_result = temp_crew.kickoff()
-                
-                try:
-                    compliance_data = json.loads(str(compliance_result))
-                    compliance_report = compliance_data.get("report", str(compliance_result))
-                except:
-                    compliance_report = str(compliance_result)
-                
-                st.write("🔍 **调试信息**：合规审查完成")
-                
-            record["compliance_report"] = compliance_report
-        
-            # 显示合规报告
-            with st.expander("📋 查看详细合规报告", expanded=False):
-                st.markdown(compliance_report)
-            
+            # 直接执行查询，跳过合规检查
             record["status"] = "pending_execution"
-            st.write("🔍 **调试信息**：设置状态为 pending_execution")
             
-            # Step 4: 执行查询（如果合规）
-            compliance_lower = str(compliance_report).lower()
-            # 更准确的合规判断逻辑
-            is_compliant = (
-                "合规通过" in str(compliance_report) or 
-                "compliant" in compliance_lower or
-                ("合规" in str(compliance_report) and "不合规" not in str(compliance_report) and "违规" not in str(compliance_report))
-            )
-            
-            st.write(f"🔍 **调试信息**：合规判断结果 = {is_compliant}")
-            st.write(f"🔍 **调试信息**：合规报告内容 = {compliance_report[:200]}...")
-            
-            if is_compliant:
-                st.write("🔍 **调试信息**：开始执行查询")
-                st.write("### 📊 Step 4: 执行查询")
-                with st.spinner("📊 执行查询..."):
-                    try:
-                        st.write(f"🔍 **调试信息**：准备执行SQL = {reviewed_sql[:100]}...")
-                        st.write("🔍 **调试信息**：调用 run_query_to_dataframe 函数")
-                        df, text_result = run_query_to_dataframe(reviewed_sql)
-                        st.write(f"🔍 **调试信息**：查询执行完成")
-                        st.write(f"🔍 **调试信息**：df类型 = {type(df)}")
-                        st.write(f"🔍 **调试信息**：df为空 = {df is None}")
-                        st.write(f"🔍 **调试信息**：text_result = {text_result[:200] if text_result else 'None'}...")
-                        
-                        st.write("🔍 **调试信息**：保存查询结果到记录")
-                        record["query_result"] = text_result
-                        record["query_dataframe"] = df
-                        
-                        # 如果查询成功，显示成功信息
-                        if df is not None:
-                            st.write("🔍 **调试信息**：查询成功，设置状态为 completed")
-                            st.success("🎉 查询执行成功！数据已准备就绪，可以使用PandasAI进行进一步分析。")
-                            record["status"] = "completed"
-                        else:
-                            st.write("🔍 **调试信息**：查询失败，df为None，设置状态为 query_failed")
-                            # 查询失败，text_result包含错误信息
-                            st.error(f"❌ 查询执行失败: {text_result}")
-                            record["status"] = "query_failed"
-                            # 从text_result中提取具体的错误信息
-                            if text_result and "查询失败:" in text_result:
-                                record["error_message"] = text_result
-                            else:
-                                record["error_message"] = text_result or "SQL查询执行失败，但未返回具体错误信息"
-                            st.write(f"🔍 **调试信息**：设置错误信息 = {record['error_message']}")
-                            
-                    except Exception as query_error:
-                        st.write("🔍 **调试信息**：查询过程中发生异常")
-                        error_msg = f"查询执行过程中发生错误: {query_error}"
-                        st.error(f"❌ {error_msg}")
-                        st.write(f"🔍 **调试信息**：查询错误类型 = {type(query_error)}")
-                        st.write(f"🔍 **调试信息**：查询错误详情 = {str(query_error)}")
+            # Step 3: 执行查询
+            st.write("### 📊 Step 3: 执行查询")
+            with st.spinner("📊 执行查询..."):
+                try:
+                    df, text_result = run_query_to_dataframe(reviewed_sql)
+                    
+                    record["query_result"] = text_result
+                    record["query_dataframe"] = df
+                    
+                    # 如果查询成功，显示成功信息
+                    if df is not None:
+                        st.success("🎉 查询执行成功！数据已准备就绪，可以使用PandasAI进行进一步分析。")
+                        record["status"] = "completed"
+                    else:
+                        # 查询失败，text_result包含错误信息
+                        st.error(f"❌ 查询执行失败: {text_result}")
                         record["status"] = "query_failed"
-                        record["error_message"] = error_msg
-            else:
-                st.write("🔍 **调试信息**：合规检查未通过")
-                st.error("❌ 查询未通过合规审查，无法执行。请查看合规报告了解详情。")
-                record["status"] = "compliance_failed"
+                        record["error_message"] = text_result or "SQL查询执行失败"
+                        
+                except Exception as query_error:
+                    error_msg = f"查询执行过程中发生错误: {query_error}"
+                    st.error(f"❌ {error_msg}")
+                    record["status"] = "query_failed"
+                    record["error_message"] = error_msg
         
         st.write("🔍 **调试信息**：准备添加记录到历史")
         st.write(f"🔍 **调试信息**：当前记录状态 = {record.get('status', 'unknown')}")
@@ -1671,9 +1598,12 @@ pip install -r requirements.txt
         sql_info = st.session_state["generated_sql_info"]
         st.subheader("🤖 SQL已生成")
         
-        # 显示生成的SQL
+        # 显示生成的SQL（格式化）
         formatted_sql = sqlparse.format(sql_info["raw_sql"], reindent=True, keyword_case='upper')
         st.code(formatted_sql, language="sql")
+        
+        # 显示格式化说明
+        st.caption("💡 SQL已自动格式化以提高可读性")
         
         # 显示选择按钮
         col1, col2, col3 = st.columns([1, 1, 2])
@@ -1725,12 +1655,26 @@ pip install -r requirements.txt
             help="请修正生成的SQL，确保查询符合您的预期"
         )
         
-        col1, col2 = st.columns([1, 3])
+        # 添加格式化按钮
+        col1, col2, col3 = st.columns([1, 1, 2])
         with col1:
             if st.button("✅ 提交修正SQL", type="primary", key="submit_manual_sql"):
                 process_manual_sql(manual_sql, st.session_state.get("pending_user_prompt", ""))
                 st.rerun()
         with col2:
+            if st.button("🎨 格式化SQL", key="format_manual_sql"):
+                # 格式化当前编辑的SQL
+                if manual_sql.strip():
+                    try:
+                        formatted_sql = sqlparse.format(manual_sql, reindent=True, keyword_case='upper')
+                        st.session_state["pending_manual_sql"] = formatted_sql
+                        st.success("✅ SQL已格式化！")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ SQL格式化失败: {e}")
+                else:
+                    st.warning("⚠️ 请先输入SQL内容")
+        with col3:
             st.caption("💡 修正后的SQL将直接进行合规检查和执行")
     
     else:

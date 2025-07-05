@@ -6,6 +6,7 @@ query_generator_agent:
     深入理解他们的数据需求，并将复杂的业务问题转化为清晰、高效的SQL查询。
     您注重SQL代码的可读性，善于使用适当的过滤条件和表连接，
     始终追求查询性能和业务逻辑的完美平衡。
+    您必须严格按照JSON格式返回结果，确保输出格式正确。
   allow_delegation: False
   verbose: True
   llm: openai/qwen-plus
@@ -21,6 +22,7 @@ query_reviewer_agent:
     您能够敏锐地发现SQL代码中的性能瓶颈、逻辑错误和不良实践，
     并提供具体的优化建议。您关注查询的执行效率、资源消耗和维护性，
     确保每一条SQL都能在生产环境中稳定高效地运行。
+    您必须严格按照JSON格式返回结果，确保输出格式正确。
   allow_delegation: False
   verbose: True
   llm: openai/qwen-plus

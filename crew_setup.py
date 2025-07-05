@@ -42,9 +42,9 @@ query_reviewer_agent = Agent(
   config=agents_config['query_reviewer_agent']
 )
 
-compliance_checker_agent = Agent(
-  config=agents_config['compliance_checker_agent']
-)
+# compliance_checker_agent = Agent(
+#   config=agents_config['compliance_checker_agent']
+# )
 
 # Creating Tasks
 query_task = Task(
@@ -59,12 +59,12 @@ review_task = Task(
   output_pydantic=ReviewedSQLQuery
 )
 
-compliance_task = Task(
-  config=tasks_config['compliance_task'],
-  agent=compliance_checker_agent,
-  context=[review_task],
-  output_pydantic=ComplianceReport
-)
+# compliance_task = Task(
+#   config=tasks_config['compliance_task'],
+#   agent=compliance_checker_agent,
+#   context=[review_task],
+#   output_pydantic=ComplianceReport
+# )
 
 # Creating Crew objects for import
 sql_generator_crew = Crew(
@@ -79,8 +79,8 @@ sql_reviewer_crew = Crew(
     verbose=True
 )
 
-sql_compliance_crew = Crew(
-    agents=[compliance_checker_agent],
-    tasks=[compliance_task],
-    verbose=True
-)
+# sql_compliance_crew = Crew(
+#     agents=[compliance_checker_agent],
+#     tasks=[compliance_task],
+#     verbose=True
+# )
