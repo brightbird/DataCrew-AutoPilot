@@ -202,161 +202,247 @@ def add_to_history(record):
     cost = record.get("cost", 0.0)
     st.session_state["llm_cost"] += cost
 
+def render_analysis_cell_with_expand_control(record, should_expand=None):
+    """渲染带展开控制的分析单元"""
+    cell_id = record["id"]
+    
+    # 确保timestamp是datetime对象
+    timestamp = record['timestamp']
+    if isinstance(timestamp, str):
+        try:
+            timestamp = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
+        except:
+            timestamp = datetime.now()
+    elif not isinstance(timestamp, datetime):
+        timestamp = datetime.now()
+    
+    # 添加人工干预标记
+    intervention_mark = "🛠️" if record.get("manual_intervention") else "🤖"
+    
+    # 判断查询状态
+    status = record.get("status", "unknown")
+    is_completed = status in ["completed", "query_failed", "error", "compliance_failed"]
+    
+    # 状态图标
+    status_icons = {
+        "completed": "✅",
+        "query_failed": "❌", 
+        "error": "⚠️",
+        "compliance_failed": "🔒",
+        "generating": "⏳",
+        "pending_execution": "⏳"
+    }
+    status_icon = status_icons.get(status, "❓")
+    
+    # 确定展开状态
+    if should_expand is None:
+        # 默认折叠已完成的查询
+        default_expanded = not is_completed
+    else:
+        default_expanded = should_expand
+    
+    # 创建可折叠的容器
+    with st.expander(
+        f"{status_icon} {intervention_mark} [{timestamp.strftime('%H:%M:%S')}] {record['user_prompt'][:60]}...",
+        expanded=default_expanded
+    ):
+        render_analysis_cell_content(record)
+
 def render_analysis_cell(record, is_current=False):
     """渲染单个分析单元"""
     cell_id = record["id"]
     
+    # 确保timestamp是datetime对象
+    timestamp = record['timestamp']
+    if isinstance(timestamp, str):
+        try:
+            timestamp = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
+        except:
+            timestamp = datetime.now()
+    elif not isinstance(timestamp, datetime):
+        timestamp = datetime.now()
+    
+    # 添加人工干预标记
+    intervention_mark = "🛠️" if record.get("manual_intervention") else "🤖"
+    
+    # 判断查询状态
+    status = record.get("status", "unknown")
+    is_completed = status in ["completed", "query_failed", "error", "compliance_failed"]
+    
+    # 状态图标
+    status_icons = {
+        "completed": "✅",
+        "query_failed": "❌", 
+        "error": "⚠️",
+        "compliance_failed": "🔒",
+        "generating": "⏳",
+        "pending_execution": "⏳"
+    }
+    status_icon = status_icons.get(status, "❓")
+    
+    # 默认折叠已完成的查询（除非是当前查询）
+    default_expanded = is_current or not is_completed
+    
     # 创建可折叠的容器
-    with st.container():
-        # 单元格头部
-        col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
-        with col1:
-            # 添加人工干预标记
-            intervention_mark = "🛠️" if record.get("manual_intervention") else "🤖"
-            # 确保timestamp是datetime对象
-            timestamp = record['timestamp']
-            if isinstance(timestamp, str):
-                try:
-                    timestamp = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
-                except:
-                    timestamp = datetime.now()
-            elif not isinstance(timestamp, datetime):
-                timestamp = datetime.now()
-            
-            st.markdown(f"**{intervention_mark} [{timestamp.strftime('%H:%M:%S')}]** {record['user_prompt'][:50]}...")
-        with col2:
-            if st.button("🔄 重新执行", key=f"rerun_{cell_id}"):
-                rerun_analysis(record["user_prompt"])
-        with col3:
-            if st.button("📋 复制", key=f"copy_{cell_id}"):
-                st.session_state["current_prompt"] = record["user_prompt"]
-                st.success("已复制到输入框")
-        with col4:
-            if st.button("🗑️ 删除", key=f"delete_{cell_id}"):
-                st.session_state["analysis_history"] = [
-                    r for r in st.session_state["analysis_history"] if r["id"] != cell_id
-                ]
+    with st.expander(
+        f"{status_icon} {intervention_mark} [{timestamp.strftime('%H:%M:%S')}] {record['user_prompt'][:60]}...",
+        expanded=default_expanded
+    ):
+        render_analysis_cell_content(record)
+
+def render_analysis_cell_content(record):
+    """渲染分析单元的内容部分"""
+    cell_id = record["id"]
+    
+    # 操作按钮行
+    col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 1, 1])
+    with col1:
+        # 显示完整查询描述
+        st.markdown(f"**查询描述：** {record['user_prompt']}")
+    with col2:
+        if st.button("🔄 重新执行", key=f"rerun_{cell_id}", help="使用相同查询重新分析"):
+            rerun_analysis(record["user_prompt"])
+    with col3:
+        if st.button("📋 复制", key=f"copy_{cell_id}", help="复制查询到输入框"):
+            st.session_state["current_prompt"] = record["user_prompt"]
+            st.success("已复制到输入框")
+    with col4:
+        if st.button("📌 置顶", key=f"pin_{cell_id}", help="将此查询移到顶部"):
+            # 将当前记录移到历史记录的最前面
+            history = st.session_state["analysis_history"]
+            current_record = next((r for r in history if r["id"] == cell_id), None)
+            if current_record:
+                history.remove(current_record)
+                history.append(current_record)
+                st.success("已置顶")
                 st.rerun()
+    with col5:
+        if st.button("🗑️删除", key=f"delete_{cell_id}", help="删除此查询记录"):
+            st.session_state["analysis_history"] = [
+                r for r in st.session_state["analysis_history"] if r["id"] != cell_id
+            ]
+            st.rerun()
+    
+    # 始终显示查询结果（如果有）
+    if record.get("query_result"):
+        st.markdown("### 📊 查询结果")
         
-        # 始终显示查询结果（如果有）
-        if record.get("query_result"):
-            st.markdown("### 📊 查询结果")
-            
-            # 显示DataFrame基本信息
-            if record.get("query_dataframe") is not None:
-                df = record["query_dataframe"]
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("数据行数", len(df))
-                with col2:
-                    st.metric("数据列数", len(df.columns))
-                with col3:
-                    st.metric("内存使用", f"{df.memory_usage(deep=True).sum() / 1024:.1f} KB")
-                
-                # 显示数据表格
-                st.dataframe(df, use_container_width=True)
-                
-                # 提供下载选项
-                col1, col2 = st.columns(2)
-                with col1:
-                    csv = df.to_csv(index=False)
-                    st.download_button(
-                        label="📥 下载CSV",
-                        data=csv,
-                        file_name=f"query_result_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                        mime="text/csv",
-                        key=f"download_csv_{cell_id}"
-                    )
-                with col2:
-                    if st.button("📋 复制数据", key=f"copy_data_{cell_id}"):
-                        st.code(df.to_string(index=False))
-            else:
-                # 如果没有DataFrame，显示文本结果
-                st.code(record["query_result"])
-        
-        # PandasAI交互区域 - 始终显示（如果有数据）
+        # 显示DataFrame基本信息
         if record.get("query_dataframe") is not None:
-            st.markdown("---")  # 分隔线
-            render_pandasai_interface(record)
-        
-        # SQL详情和其他信息的可折叠区域
-        expanded = is_current or st.checkbox("📋 查看SQL详情", key=f"expand_{cell_id}")
-        
-        if expanded:
-            # 如果经过人工干预，优先显示人工修正的信息
-            if record.get("manual_intervention"):
-                st.info("🛠️ 此查询经过人工干预修正")
-                
-                # 显示人工修正的SQL
-                if record.get("manual_sql"):
-                    with st.expander("✏️ 人工修正的SQL", expanded=True):
-                        formatted_sql = sqlparse.format(record["manual_sql"], reindent=True, keyword_case='upper')
-                        st.code(formatted_sql, language="sql")
-            else:
-                # 显示生成的SQL
-                if record.get("generated_sql"):
-                    with st.expander("📝 生成的SQL", expanded=False):
-                        formatted_sql = sqlparse.format(record["generated_sql"], reindent=True, keyword_case='upper')
-                        st.code(formatted_sql, language="sql")
-                
-                # 显示审查后的SQL
-                if record.get("reviewed_sql") and not record.get("manual_intervention"):
-                    with st.expander("✅ 审查后的SQL", expanded=True):
-                        formatted_sql = sqlparse.format(record["reviewed_sql"], reindent=True, keyword_case='upper')
-                        st.code(formatted_sql, language="sql")
+            df = record["query_dataframe"]
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("数据行数", len(df))
+            with col2:
+                st.metric("数据列数", len(df.columns))
+            with col3:
+                st.metric("内存使用", f"{df.memory_usage(deep=True).sum() / 1024:.1f} KB")
             
-            # 显示合规报告
+            # 显示数据表格
+            st.dataframe(df, use_container_width=True)
+            
+            # 提供下载选项
+            col1, col2 = st.columns(2)
+            with col1:
+                csv = df.to_csv(index=False)
+                st.download_button(
+                    label="📥 下载CSV",
+                    data=csv,
+                    file_name=f"query_result_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    key=f"download_csv_{cell_id}"
+                )
+            with col2:
+                if st.button("📋 复制数据", key=f"copy_data_{cell_id}"):
+                    st.code(df.to_string(index=False))
+        else:
+            # 如果没有DataFrame，显示文本结果
+            st.code(record["query_result"])
+    
+    # PandasAI交互区域 - 始终显示（如果有数据）
+    if record.get("query_dataframe") is not None:
+        st.markdown("---")  # 分隔线
+        render_pandasai_interface(record)
+    
+    # SQL详情和其他信息的可折叠区域
+    # 默认不展开SQL详情，用户可以手动展开
+    expanded = st.checkbox("📋 查看SQL详情", key=f"expand_{cell_id}")
+    
+    if expanded:
+        # 如果经过人工干预，优先显示人工修正的信息
+        if record.get("manual_intervention"):
+            st.info("🛠️ 此查询经过人工干预修正")
+            
+            # 显示人工修正的SQL
+            if record.get("manual_sql"):
+                with st.expander("✏️ 人工修正的SQL", expanded=True):
+                    formatted_sql = sqlparse.format(record["manual_sql"], reindent=True, keyword_case='upper')
+                    st.code(formatted_sql, language="sql")
+        else:
+            # 显示生成的SQL
+            if record.get("generated_sql"):
+                with st.expander("📝 生成的SQL", expanded=False):
+                    formatted_sql = sqlparse.format(record["generated_sql"], reindent=True, keyword_case='upper')
+                    st.code(formatted_sql, language="sql")
+            
+            # 显示审查后的SQL
+            if record.get("reviewed_sql") and not record.get("manual_intervention"):
+                with st.expander("✅ 审查后的SQL", expanded=True):
+                    formatted_sql = sqlparse.format(record["reviewed_sql"], reindent=True, keyword_case='upper')
+                    st.code(formatted_sql, language="sql")
+        
+        # 显示合规报告
+        if record.get("compliance_report"):
+            with st.expander("🔒 合规报告", expanded=False):
+                st.markdown(record["compliance_report"])
+        
+        # 显示成本信息（包含人工干预标记）
+        cost_info = f"💰 本次查询成本: ${record['cost']:.6f}"
+        if record.get("manual_intervention"):
+            cost_info += " (人工干预)"
+        st.caption(cost_info)
+    
+    # 如果没有查询结果，显示状态信息
+    if not record.get("query_result"):
+        status = record.get("status", "unknown")
+        if status == "compliance_failed":
+            st.error("❌ 查询未通过合规审查")
+            # 显示合规报告详情
             if record.get("compliance_report"):
-                with st.expander("🔒 合规报告", expanded=False):
+                with st.expander("查看合规报告详情"):
                     st.markdown(record["compliance_report"])
-            
-            # 显示成本信息（包含人工干预标记）
-            cost_info = f"💰 本次查询成本: ${record['cost']:.6f}"
-            if record.get("manual_intervention"):
-                cost_info += " (人工干预)"
-            st.caption(cost_info)
-        
-        # 如果没有查询结果，显示状态信息
-        if not record.get("query_result"):
-            status = record.get("status", "unknown")
-            if status == "compliance_failed":
-                st.error("❌ 查询未通过合规审查")
-                # 显示合规报告详情
-                if record.get("compliance_report"):
-                    with st.expander("查看合规报告详情"):
-                        st.markdown(record["compliance_report"])
-            elif status == "error":
-                error_msg = record.get("error_message", "未知错误")
-                st.error(f"❌ 查询执行出错: {error_msg}")
-                # 显示更多错误详情
-                st.write(f"🔍 **错误详情**：{error_msg}")
-                if "error_details" in record:
-                    st.code(record["error_details"])
-            elif status == "query_failed":
-                error_msg = record.get("error_message", "SQL查询执行失败")
-                st.error(f"❌ SQL查询执行失败: {error_msg}")
-                # 显示SQL和错误详情
-                if record.get("reviewed_sql"):
-                    with st.expander("查看失败的SQL"):
-                        st.code(record["reviewed_sql"], language="sql")
-            elif status == "generating":
-                st.info("⏳ 正在生成SQL查询...")
-            elif status == "pending_execution":
-                st.info("⏳ 等待执行查询...")
-            else:
-                st.info(f"⏳ 查询正在处理中... (状态: {status})")
-                # 显示记录的所有状态信息用于调试
-                st.write("🔍 **调试信息 - 记录状态**:")
-                debug_info = {
-                    "status": record.get("status"),
-                    "has_query_result": bool(record.get("query_result")),
-                    "has_query_dataframe": record.get("query_dataframe") is not None,
-                    "has_error_message": bool(record.get("error_message")),
-                    "record_keys": list(record.keys())
-                }
-                st.json(debug_info)
-        
-        st.divider()
+        elif status == "error":
+            error_msg = record.get("error_message", "未知错误")
+            st.error(f"❌ 查询执行出错: {error_msg}")
+            # 显示更多错误详情
+            st.write(f"🔍 **错误详情**：{error_msg}")
+            if "error_details" in record:
+                st.code(record["error_details"])
+        elif status == "query_failed":
+            error_msg = record.get("error_message", "SQL查询执行失败")
+            st.error(f"❌ SQL查询执行失败: {error_msg}")
+            # 显示SQL和错误详情
+            if record.get("reviewed_sql"):
+                with st.expander("查看失败的SQL"):
+                    st.code(record["reviewed_sql"], language="sql")
+        elif status == "generating":
+            st.info("⏳ 正在生成SQL查询...")
+        elif status == "pending_execution":
+            st.info("⏳ 等待执行查询...")
+        else:
+            st.info(f"⏳ 查询正在处理中... (状态: {status})")
+            # 显示记录的所有状态信息用于调试
+            st.write("🔍 **调试信息 - 记录状态**:")
+            debug_info = {
+                "status": record.get("status"),
+                "has_query_result": bool(record.get("query_result")),
+                "has_query_dataframe": record.get("query_dataframe") is not None,
+                "has_error_message": bool(record.get("error_message")),
+                "record_keys": list(record.keys())
+            }
+            st.json(debug_info)
+    
+    st.divider()
 
 def render_pandasai_interface(record):
     """渲染PandasAI交互界面"""
@@ -681,6 +767,9 @@ def process_manual_sql(manual_sql: str, user_request: str):
             if df is not None:
                 st.success("🎉 查询执行成功！数据已准备就绪，可以使用PandasAI进行进一步分析。")
                 record["status"] = "completed"
+                # 人工干预模式完成后，建议用户归档历史查询
+                if len(st.session_state["analysis_history"]) > 1:
+                    st.info("💡 **提示**：人工干预查询已完成！您可以点击上方的 '🗂️ 归档完成' 按钮来折叠已完成的查询，方便开始新的分析。")
             else:
                 # 查询失败，text_result包含错误信息
                 st.error(f"❌ 查询执行失败: {text_result}")
@@ -692,6 +781,17 @@ def process_manual_sql(manual_sql: str, user_request: str):
         try:
             add_to_history(record)
             st.write("🔍 **调试信息**：记录已添加到历史")
+            
+            # 人工干预完成后清除相关状态
+            if record.get("status") in ["completed", "query_failed", "error"]:
+                st.session_state["manual_intervention_mode"] = False
+                st.session_state["pending_manual_sql"] = ""
+                st.session_state["pending_user_prompt"] = ""
+                st.session_state["current_cell"] = None
+                # 清空输入框，准备新查询
+                if "current_prompt" in st.session_state:
+                    st.session_state["current_prompt"] = ""
+                    
         except Exception as history_error:
             st.error(f"❌ 添加记录到历史时发生错误: {history_error}")
             st.write(f"🔍 **调试信息**：历史记录错误类型 = {type(history_error)}")
@@ -854,6 +954,9 @@ def continue_with_generated_sql(generated_sql: str, user_request: str, record: d
                     if df is not None:
                         st.success("🎉 查询执行成功！数据已准备就绪，可以使用PandasAI进行进一步分析。")
                         record["status"] = "completed"
+                        # 查询完成后，建议用户归档历史查询
+                        if len(st.session_state["analysis_history"]) > 1:
+                            st.info("💡 **提示**：查询已完成！您可以点击上方的 '🗂️ 归档完成' 按钮来折叠已完成的查询，方便开始新的分析。")
                     else:
                         # 查询失败，text_result包含错误信息
                         st.error(f"❌ 查询执行失败: {text_result}")
@@ -1275,6 +1378,12 @@ def main():
         if total_queries > 0:
             st.metric("干预率", f"{intervention_rate:.1f}%")
         
+        # 快速归档按钮
+        if st.button("🗂️ 快速归档", help="折叠所有已完成的查询"):
+            st.session_state["archive_completed_trigger"] = True
+            st.success("已归档完成的查询")
+            st.rerun()
+        
         if st.button("🗑️ 清空历史"):
             st.session_state["analysis_history"] = []
             st.session_state["llm_cost"] = 0.0
@@ -1498,6 +1607,29 @@ pip install -r requirements.txt
     # 新查询输入区域
     st.subheader("🔧 新建分析")
     
+    # 智能提示区域
+    if st.session_state["analysis_history"]:
+        completed_queries = [r for r in st.session_state["analysis_history"] 
+                           if r.get("status") in ["completed", "query_failed", "error", "compliance_failed"]]
+        if completed_queries:
+            st.markdown("""
+            <div style="background: linear-gradient(90deg, #e3f2fd, #f3e5f5); padding: 10px; border-radius: 8px; margin-bottom: 15px;">
+                <h4 style="margin: 0; color: #1976d2;">💡 快速开始新分析</h4>
+                <p style="margin: 5px 0 0 0; color: #424242; font-size: 14px;">
+                    您已完成 <strong>{}</strong> 个查询。点击上方的 <strong>🗂️ 归档完成</strong> 按钮可以折叠已完成的查询，让界面更整洁。
+                </p>
+            </div>
+            """.format(len(completed_queries)), unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div style="background: linear-gradient(90deg, #e8f5e8, #f0f8ff); padding: 10px; border-radius: 8px; margin-bottom: 15px;">
+            <h4 style="margin: 0; color: #2e7d32;">🎯 开始您的数据分析之旅</h4>
+            <p style="margin: 5px 0 0 0; color: #424242; font-size: 14px;">
+                用自然语言描述您的分析需求，AI将为您生成并执行SQL查询。
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+    
     # 添加人工干预模式开关
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -1695,12 +1827,62 @@ pip install -r requirements.txt
     
     # 显示历史分析
     if st.session_state["analysis_history"]:
-        st.subheader("📚 分析历史")
+        # 历史管理头部
+        col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+        with col1:
+            st.subheader("📚 分析历史")
+        with col2:
+            # 全部展开/折叠按钮
+            if st.button("📖 全部展开", key="expand_all", help="展开所有历史查询"):
+                st.session_state["expand_all_history"] = True
+                st.rerun()
+        with col3:
+            if st.button("📕 全部折叠", key="collapse_all", help="折叠所有历史查询"):
+                st.session_state["expand_all_history"] = False
+                st.rerun()
+        with col4:
+            if st.button("🗂️ 归档完成", key="archive_completed", help="折叠所有已完成的查询"):
+                st.session_state["archive_completed_trigger"] = True
+                st.rerun()
         
-        # 按时间倒序显示
-        for record in reversed(st.session_state["analysis_history"]):
+        # 统计信息
+        total_count = len(st.session_state["analysis_history"])
+        completed_count = len([r for r in st.session_state["analysis_history"] 
+                              if r.get("status") in ["completed", "query_failed", "error", "compliance_failed"]])
+        running_count = total_count - completed_count
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("总查询数", total_count)
+        with col2:
+            st.metric("已完成", completed_count)
+        with col3:
+            st.metric("进行中", running_count)
+        
+        st.markdown("---")
+        
+        # 按时间倒序显示，但根据全局设置调整展开状态
+        for i, record in enumerate(reversed(st.session_state["analysis_history"])):
             is_current = record["id"] == st.session_state.get("current_cell")
-            render_analysis_cell(record, is_current)
+            
+            # 判断是否应该展开
+            should_expand = is_current
+            if st.session_state.get("expand_all_history"):
+                should_expand = True
+            elif st.session_state.get("expand_all_history") == False:
+                should_expand = False
+            elif st.session_state.get("archive_completed_trigger"):
+                # 归档模式：只展开未完成的查询
+                status = record.get("status", "unknown")
+                should_expand = status not in ["completed", "query_failed", "error", "compliance_failed"]
+            
+            render_analysis_cell_with_expand_control(record, should_expand)
+        
+        # 重置全局展开状态
+        if st.session_state.get("expand_all_history") is not None:
+            st.session_state["expand_all_history"] = None
+        if st.session_state.get("archive_completed_trigger"):
+            st.session_state["archive_completed_trigger"] = False
     else:
         st.info("👆 开始您的第一次数据分析吧！")
 
