@@ -13,7 +13,13 @@ tags: ["AI", "CrewAI", "PandasAI", "DataAnalysis", "Python"]
 
 这个项目就是为了实现这个梦想而诞生的。我们希望通过结合强大的 **CrewAI** 多智能体协作框架和 **PandasAI** 智能数据分析库，打造一个真正意义上的**数据分析「自动驾驶」系统**。
 
-![封面图](https://github.com/brightbird/DataCrew-AutoPilot/raw/main/assets/cover.png)  *（请替换为项目封面图链接）*
+## 🎬 系统演示视频
+
+> **1分34秒快速了解完整功能** - 2倍速演示视频
+
+https://github.com/brightbird/DataCrew-AutoPilot/raw/main/video/DataCrew-AutoPilot演示视频_2x.mp4
+
+*📹 演示视频展示了完整的"自动驾驶"数据分析流程：自然语言输入 → AI智能体协作生成SQL → 智能审查优化 → 人工干预调整 → 自动执行分析 → 智能可视化输出 → 历史管理归档*
 
 ## 🤯 背景：数据分析的「驾驶疲劳」
 
