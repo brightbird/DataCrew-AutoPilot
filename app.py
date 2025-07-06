@@ -724,27 +724,18 @@ def process_manual_sql(manual_sql: str, user_request: str):
     if manual_sql and manual_sql.strip():
         st.write("### 🔍 SQL代码审查")
         
-        with st.spinner("🔍 正在进行SQL代码审查..."):
-            # 使用智能任务创建函数
-            review_task = create_sql_review_task(manual_sql)
-            
-            # 创建临时的Crew来执行这个任务
-            from crewai import Crew
-            temp_crew = Crew(
-                agents=[query_reviewer_agent],
-                tasks=[review_task],
-                verbose=False
-            )
-            
-            # 使用静默上下文管理器
-            with SilentCrewAI():
-                review_result = temp_crew.kickoff()
-            
-            # 提取审查后的SQL
-            reviewed_sql = extract_sql_from_response(str(review_result))
+        # 在人工干预模式下，直接使用用户修正的SQL，不再调用AI审查
+        # 因为用户已经手动修正了SQL，应该信任用户的判断
+        reviewed_sql = manual_sql.strip()
         
-        # 显示审查后的SQL
-        st.code(reviewed_sql, language="sql")
+        # 简单的SQL语法检查
+        if not reviewed_sql.upper().startswith('SELECT'):
+            st.warning("⚠️ 注意：当前只支持SELECT查询语句")
+        
+        # 显示将要执行的SQL
+        st.write("**将要执行的SQL查询：**")
+        formatted_sql = sqlparse.format(reviewed_sql, reindent=True, keyword_case='upper')
+        st.code(formatted_sql, language="sql")
         
         # 直接执行查询，跳过合规检查
         
@@ -1767,7 +1758,7 @@ pip install -r requirements.txt
     
     # 检查是否处于人工干预模式
     if st.session_state.get("manual_intervention_mode", False):
-        st.info("🛠️ 人工干预模式：请修正生成的SQL后提交")
+        st.info("🛠️ **人工干预模式**：您可以直接修正SQL并执行，系统将信任您的修正")
         
         col1, col2 = st.columns([3, 1])
         with col1:
@@ -1779,12 +1770,24 @@ pip install -r requirements.txt
                 st.session_state["pending_user_prompt"] = ""
                 st.rerun()
         
+        # 添加人工干预模式说明
+        st.markdown("""
+        <div style="background: #e8f4f8; padding: 10px; border-radius: 8px; margin-bottom: 15px;">
+            <h5 style="margin: 0 0 5px 0; color: #0066cc;">💡 人工干预模式说明</h5>
+            <p style="margin: 0; color: #333; font-size: 14px;">
+                • 您可以直接修正下方的SQL，系统将直接执行您的修正版本<br>
+                • 不会再进行AI审查，完全信任您的专业判断<br>
+                • 支持SQL格式化功能，提高代码可读性
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        
         # SQL编辑器
         manual_sql = st.text_area(
             "编辑SQL：",
             value=st.session_state.get("pending_manual_sql", ""),
             height=200,
-            help="请修正生成的SQL，确保查询符合您的预期"
+            help="直接修正SQL，系统将执行您的修正版本，不再进行AI审查"
         )
         
         # 添加格式化按钮
